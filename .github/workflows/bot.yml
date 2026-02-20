@@ -1,4 +1,4 @@
-name: Nexus DenX Bot Scheduler
+name: MSL Academy Bot Scheduler
 
 on:
   schedule:
