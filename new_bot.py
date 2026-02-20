@@ -766,11 +766,6 @@ async def run_trading_session():
 🥈 MG1 Wins: {stats["mg1_wins"]}
 🥉 MG2 Wins: {stats["mg2_wins"]}
 
-⏱️ TIMING:
-• Each signal: 9 min (3 entries × 3 min)
-• Gap between signals: 1 min
-• Total session: ~{total * 12} minutes
-
 OTC Session completed! 🎉"""
     
     send_telegram(summary)
@@ -800,4 +795,5 @@ if __name__ == "__main__":
     print(f"🚀 Fast Mode: {'ON' if FAST_MODE else 'OFF'}")
     print(f"💬 Telegram: {'CONFIGURED' if TELEGRAM_BOT_TOKEN else 'SIMULATION'}")
     print("-" * 60)
+
     asyncio.run(main())
