@@ -1,0 +1,39 @@
+name: Nexus DenX Bot Scheduler
+
+on:
+  schedule:
+    # 9AM WAT (8AM UTC)
+    - cron: '0 8 * * *'
+    # 3PM WAT (2PM UTC)
+    - cron: '0 14 * * *'
+    # 8PM WAT (7PM UTC)
+    - cron: '0 19 * * *'
+  workflow_dispatch:
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Nexus DenX Bot
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          USE_POCKET_OPTION: ${{ secrets.USE_POCKET_OPTION }}
+          PO_SESSION_TOKEN: ${{ secrets.PO_SESSION_TOKEN }}
+          PO_USER_ID: ${{ secrets.PO_USER_ID }}
+        run: |
+          python new_bot.py
