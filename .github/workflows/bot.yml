@@ -1,10 +1,13 @@
-name: MSL Academy Bot Scheduler
+name: MSL VIP Bot Scheduler
 
 on:
   schedule:
-    # 8AM WAT (7AM UTC)
-    - cron: '0 7 * * *'
-
+    # 9AM WAT (8AM UTC)
+    - cron: '0 8 * * *'
+    # 3PM WAT (2PM UTC)
+    - cron: '0 14 * * *'
+    # 8PM WAT (7PM UTC)
+    - cron: '0 19 * * *'
   workflow_dispatch:
 
 jobs:
@@ -12,7 +15,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -26,13 +28,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run MSL Academy Bot
+      - name: Run MSL VIP Bot
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           USE_POCKET_OPTION: ${{ secrets.USE_POCKET_OPTION }}
           PO_SESSION_TOKEN: ${{ secrets.PO_SESSION_TOKEN }}
           PO_USER_ID: ${{ secrets.PO_USER_ID }}
-
         run: |
           python bot.py
+
