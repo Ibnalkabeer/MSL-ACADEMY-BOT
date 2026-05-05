@@ -728,10 +728,14 @@ async def run_trading_session():
             drop_time = datetime.now(LAGOS_TZ)
             # Entry time set to 1 minute after drop time
             entry_time = drop_time + timedelta(minutes=1)
+
+            # Override confidence with random value between 90 and 97
+            display_confidence = random.randint(90, 97)
+
             sig = {
                 "id": str(uuid.uuid4()), "pair": sig_cand["pair"], "direction": sig_cand["direction"],
-                "strategy": sig_cand["strategy"], "confidence": sig_cand["confidence"],
-                "confidence_label": confidence_label(sig_cand["confidence"]),
+                "strategy": sig_cand["strategy"], "confidence": display_confidence,
+                "confidence_label": confidence_label(display_confidence),
                 "expiry_minutes": EXPIRY_MINUTES, "drop_time": drop_time,
                 "entry_time": entry_time,
                 "mg1_time": entry_time + timedelta(minutes=EXPIRY_MINUTES),
@@ -740,7 +744,7 @@ async def run_trading_session():
             }
             save_signal(sig)
             send_telegram(format_signal_message(sig))
-            print(f"[SESSION-OTC] Signal sent: {sig['pair']} {sig['direction']} - Strategy: {sig['strategy']}")
+            print(f"[SESSION-OTC] Signal sent: {sig['pair']} {sig['direction']} - Confidence: {display_confidence}% - Strategy: {sig['strategy']}")
 
             # Execute signal - ALWAYS RUNS ALL 3 ENTRIES
             result, win_type = await execute_signal(feed, sig)
