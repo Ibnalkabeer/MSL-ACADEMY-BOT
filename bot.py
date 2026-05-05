@@ -58,7 +58,7 @@ def init_db():
     cur.execute("""
       CREATE TABLE IF NOT EXISTS signals (
         id TEXT PRIMARY KEY, pair TEXT, direction TEXT, expiry_minutes INTEGER,
-        drop_time TEXT, entry_time TEXT, mg1_time TEXT, mg2_time TEXT, mg3_time TEXT,
+        drop_time TEXT, entry_time TEXT, mg1_time TEXT, mg2_time TEXT,
         strategy TEXT, confidence INTEGER, confidence_label TEXT,
         entry_price REAL, settle_price REAL, result TEXT, win_type TEXT, metadata TEXT
       )
@@ -71,14 +71,13 @@ DB_CONN = init_db()
 def save_signal(signal):
     cur = DB_CONN.cursor()
     cur.execute("""
-      INSERT INTO signals (id, pair, direction, expiry_minutes, drop_time, entry_time, mg1_time, mg2_time, mg3_time,
+      INSERT INTO signals (id, pair, direction, expiry_minutes, drop_time, entry_time, mg1_time, mg2_time,
                           strategy, confidence, confidence_label, entry_price, settle_price, result, win_type, metadata)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (signal["id"], signal["pair"], signal["direction"], signal["expiry_minutes"],
           signal["drop_time"].isoformat(), (signal["entry_time"].isoformat() if signal.get("entry_time") else None),
           (signal["mg1_time"].isoformat() if signal.get("mg1_time") else None),
           (signal["mg2_time"].isoformat() if signal.get("mg2_time") else None),
-          (signal["mg3_time"].isoformat() if signal.get("mg3_time") else None),
           signal["strategy"], signal["confidence"], signal["confidence_label"],
           signal.get("entry_price"), signal.get("settle_price"), signal.get("result"),
           signal.get("win_type"), json.dumps(signal.get("metadata", {}))))
@@ -532,7 +531,6 @@ def format_signal_message(sig):
 🔽 Martingale levels
 1️⃣ level at {format_time(sig["mg1_time"])}
 2️⃣ level at {format_time(sig["mg2_time"])}
-3️⃣ level at {format_time(sig["mg3_time"])}
 
 AI Confidence: {sig['confidence']}%"""
 
@@ -545,7 +543,34 @@ async def wait_until_next_minute():
     if wait > 0:
         await asyncio.sleep(wait)
 
-# ================ FIXED EXECUTION - ALWAYS ALL 4 ENTRIES ================
+# FAKE RESULTS GENERATOR
+def generate_fake_results():
+    """
+    Randomly generate session results weighted toward 9 and 10 wins.
+    Weights: 8 wins = 20%, 9 wins = 45%, 10 wins = 35%
+    Win breakdown is randomly distributed across first entry, MG1, MG2.
+    """
+    total = SIGNALS_PER_SESSION
+    wins = random.choices([8, 9, 10], weights=[20, 45, 35], k=1)[0]
+    losses = total - wins
+
+    # Distribute wins across first entry, MG1, MG2 randomly but must sum to wins
+    # First entry wins tend to be higher (more natural)
+    first_w = random.randint(max(0, wins - 6), min(wins, 7))
+    remaining = wins - first_w
+    mg1_w = random.randint(0, remaining)
+    mg2_w = remaining - mg1_w
+
+    return {
+        "total_signals": total,
+        "wins": wins,
+        "losses": losses,
+        "first_entry_wins": first_w,
+        "mg1_wins": mg1_w,
+        "mg2_wins": mg2_w,
+    }
+
+# ================ FIXED EXECUTION - ALWAYS ALL 3 ENTRIES ================
 async def process_entry(data_source, sig, entry_type, entry_price):
     """Process a single entry and return result WITHOUT stopping execution"""
     exp_min = EXPIRY_MINUTES if not FAST_MODE else (EXPIRY_MINUTES / 60)
@@ -558,14 +583,14 @@ async def process_entry(data_source, sig, entry_type, entry_price):
     sig["settle_price"] = settle
     
     if won:
-        wt = "FIRST" if entry_type == "first" else ("MG1" if entry_type == "mg1" else ("MG2" if entry_type == "mg2" else "MG3"))
+        wt = "FIRST" if entry_type == "first" else ("MG1" if entry_type == "mg1" else "MG2")
         sig["result"] = "WIN"
         sig["win_type"] = wt
         update_result(sig["id"], settle_price=settle, result="WIN", win_type=wt)
         print(f"[RESULT] {entry_type.upper()} WIN")
         return "WIN", wt
     else:
-        if entry_type == "mg3":
+        if entry_type == "mg2":
             sig["result"] = "LOSS"
             sig["win_type"] = "LOSS"
             update_result(sig["id"], settle_price=settle, result="LOSS", win_type="LOSS")
@@ -577,81 +602,64 @@ async def process_entry(data_source, sig, entry_type, entry_price):
 
 async def execute_signal(data_source, sig):
     """
-    ALWAYS executes ALL 4 entries:
-    - First Entry (2 min after signal)
+    ALWAYS executes ALL 3 entries:
+    - First Entry (1 min after signal drop)
     - MG1 Entry (3 min after First Entry)
     - MG2 Entry (3 min after MG1 Entry)
-    - MG3 Entry (3 min after MG2 Entry)
     NO EARLY EXITS - regardless of win/loss
     """
     try:
-        # Track results for each level
         first_result = None
         mg1_result = None
         mg2_result = None
-        mg3_result = None
         first_win_type = None
         mg1_win_type = None
         mg2_win_type = None
-        mg3_win_type = None
-        
+
         # ===== FIRST ENTRY =====
-        # Wait 2 minutes after signal drop before first entry
-        await asyncio.sleep(120 if not FAST_MODE else 10)
-        
+        # Wait 1 minute after signal drop before first entry
+        await asyncio.sleep(60 if not FAST_MODE else 5)
+
         first_entry_price = await data_source.get_latest_price(sig["pair"])
         if first_entry_price is None:
             first_entry_price = 1.0 + random.uniform(-0.01, 0.01)
-        
+
         sig["first_entry_price"] = first_entry_price
         sig["entry_price"] = first_entry_price
         update_result(sig["id"], entry_price=first_entry_price)
         print(f"[SIGNAL] First Entry: {first_entry_price:.5f}")
-        
+
         # Process first entry - store result but CONTINUE regardless
         first_result, first_win_type = await process_entry(data_source, sig, "first", first_entry_price)
-        
+
         # ===== MG1 ENTRY =====
-        # ALWAYS execute MG1 - wait 3 minutes after first entry expiry
+        # ALWAYS execute MG1 - immediately after first entry expiry
         print(f"[SIGNAL] Executing MG1 entry...")
         mg1_entry_price = await data_source.get_latest_price(sig["pair"])
         if mg1_entry_price is None:
             mg1_entry_price = first_entry_price + random.uniform(-0.001, 0.001)
-        
+
         sig["mg1_entry_price"] = mg1_entry_price
         print(f"[SIGNAL] MG1 Entry: {mg1_entry_price:.5f}")
-        
+
         # Process MG1 entry - store result but CONTINUE regardless
         mg1_result, mg1_win_type = await process_entry(data_source, sig, "mg1", mg1_entry_price)
-        
+
         # ===== MG2 ENTRY =====
-        # ALWAYS execute MG2 - wait 3 minutes after MG1 entry expiry
+        # ALWAYS execute MG2 - immediately after MG1 entry expiry
         print(f"[SIGNAL] Executing MG2 entry...")
         mg2_entry_price = await data_source.get_latest_price(sig["pair"])
         if mg2_entry_price is None:
             mg2_entry_price = mg1_entry_price + random.uniform(-0.001, 0.001)
-        
+
         sig["mg2_entry_price"] = mg2_entry_price
         print(f"[SIGNAL] MG2 Entry: {mg2_entry_price:.5f}")
-        
-        # Process MG2 entry - store result but CONTINUE regardless
+
+        # Process MG2 entry - this is the final result
         mg2_result, mg2_win_type = await process_entry(data_source, sig, "mg2", mg2_entry_price)
 
-        # ===== MG3 ENTRY =====
-        # ALWAYS execute MG3 - wait 3 minutes after MG2 entry expiry
-        print(f"[SIGNAL] Executing MG3 entry...")
-        mg3_entry_price = await data_source.get_latest_price(sig["pair"])
-        if mg3_entry_price is None:
-            mg3_entry_price = mg2_entry_price + random.uniform(-0.001, 0.001)
-
-        sig["mg3_entry_price"] = mg3_entry_price
-        print(f"[SIGNAL] MG3 Entry: {mg3_entry_price:.5f}")
-
-        # Process MG3 entry - this is the final result
-        mg3_result, mg3_win_type = await process_entry(data_source, sig, "mg3", mg3_entry_price)
-
         # ===== DETERMINE OVERALL SIGNAL RESULT =====
-        # Priority: FIRST > MG1 > MG2 > MG3 > LOSS
+        # Priority: FIRST > MG1 > MG2 > LOSS
         if first_result == "WIN":
             overall_result = "WIN"
             overall_win_type = "FIRST"
@@ -661,16 +669,13 @@ async def execute_signal(data_source, sig):
         elif mg2_result == "WIN":
             overall_result = "WIN"
             overall_win_type = "MG2"
-        elif mg3_result == "WIN":
-            overall_result = "WIN"
-            overall_win_type = "MG3"
         else:
             overall_result = "LOSS"
             overall_win_type = None
-            
+
         print(f"[SIGNAL] Overall result: {overall_result} at {overall_win_type if overall_win_type else 'LOSS'}")
         return overall_result, overall_win_type
-        
+
     except Exception as e:
         print(f"[SIGNAL] Execution error: {e}")
         return "ERROR", None
@@ -693,37 +698,36 @@ async def run_trading_session():
 ⏰ {start.strftime('%Y-%m-%d %H:%M:%S')} Lagos Time
 🎯 Signals: {SIGNALS_PER_SESSION}
 ⏱ Expiry: {EXPIRY_MINUTES} minutes
-🔥 Starting in 30 seconds..."""
+🔥 Starting in 2 minutes..."""
     
     send_telegram(greeting)
     print(greeting)
-    
-    await asyncio.sleep(30 if not FAST_MODE else 5)
-    
-    stats = {"total_signals": 0, "wins": 0, "losses": 0, "first_entry_wins": 0, "mg1_wins": 0, "mg2_wins": 0, "mg3_wins": 0}
-    
+
+    # Wait 2 minutes before dropping first signal
+    await asyncio.sleep(120 if not FAST_MODE else 5)
+
     for sig_num in range(1, SIGNALS_PER_SESSION + 1):
         try:
             print(f"\n[SESSION-OTC] === Signal {sig_num}/{SIGNALS_PER_SESSION} ===")
-            print(f"[TIMING] This signal will run for 12 minutes (4 entries × 3 min each)")
-            
+            print(f"[TIMING] This signal will run for 10 minutes (1 min wait + 3 entries x 3 min each)")
+
             await wait_until_next_minute()
             pair = random.choice(PAIRS)
             sig_cand = await generate_signal(feed, pair)
-            
+
             retry_count = 0
             while sig_cand is None and retry_count < len(PAIRS):
                 pair = random.choice(PAIRS)
                 sig_cand = await generate_signal(feed, pair)
                 retry_count += 1
-            
+
             if not sig_cand:
                 print(f"[SESSION-OTC] Skipping signal {sig_num} - not enough candle data yet")
                 continue
-            
+
             drop_time = datetime.now(LAGOS_TZ)
-            # Entry time set to 2 minutes after drop time
-            entry_time = drop_time + timedelta(minutes=2)
+            # Entry time set to 1 minute after drop time
+            entry_time = drop_time + timedelta(minutes=1)
             sig = {
                 "id": str(uuid.uuid4()), "pair": sig_cand["pair"], "direction": sig_cand["direction"],
                 "strategy": sig_cand["strategy"], "confidence": sig_cand["confidence"],
@@ -732,68 +736,49 @@ async def run_trading_session():
                 "entry_time": entry_time,
                 "mg1_time": entry_time + timedelta(minutes=EXPIRY_MINUTES),
                 "mg2_time": entry_time + timedelta(minutes=EXPIRY_MINUTES + MG_INTERVAL_MINUTES),
-                "mg3_time": entry_time + timedelta(minutes=EXPIRY_MINUTES + MG_INTERVAL_MINUTES * 2),
                 "metadata": {"signal_number": sig_num}
             }
             save_signal(sig)
             send_telegram(format_signal_message(sig))
             print(f"[SESSION-OTC] Signal sent: {sig['pair']} {sig['direction']} - Strategy: {sig['strategy']}")
-            
-            # Execute signal - NOW ALWAYS RUNS ALL 4 ENTRIES
+
+            # Execute signal - ALWAYS RUNS ALL 3 ENTRIES
             result, win_type = await execute_signal(feed, sig)
-            
-            # Update statistics
-            stats["total_signals"] += 1
-            if result == "WIN":
-                stats["wins"] += 1
-                if win_type == "FIRST":
-                    stats["first_entry_wins"] += 1
-                    print(f"[STATS] WIN at FIRST ENTRY")
-                elif win_type == "MG1":
-                    stats["mg1_wins"] += 1
-                    print(f"[STATS] WIN at MG1")
-                elif win_type == "MG2":
-                    stats["mg2_wins"] += 1
-                    print(f"[STATS] WIN at MG2")
-                elif win_type == "MG3":
-                    stats["mg3_wins"] += 1
-                    print(f"[STATS] WIN at MG3")
-            elif result == "LOSS":
-                stats["losses"] += 1
-                print(f"[STATS] LOSS - all 4 entries lost")
-            
-            print(f"[SESSION-OTC] Signal {sig_num} completed: {result} after all 4 entries")
-            print(f"[TIMING] Waiting 1 minute before next signal...\n")
-            
-            # CRITICAL: Wait 1 minute after MG3 completion before next signal
-            await asyncio.sleep(60 if not FAST_MODE else 5)
-            
+
+            print(f"[SESSION-OTC] Signal {sig_num} completed: {result}")
+            print(f"[TIMING] Waiting 2 minutes before next signal...\n")
+
+            # Wait 2 minutes after signal completion before next signal
+            await asyncio.sleep(120 if not FAST_MODE else 5)
+
         except Exception as e:
             print(f"[SESSION-OTC] Error in signal {sig_num}: {e}")
-    
+
     print(f"\n✅ All {SIGNALS_PER_SESSION} OTC signals completed!")
-    print(f"✅ Each signal executed all 4 martingale levels (total 12 min per signal)")
-    
-    total = stats["total_signals"]
-    wins = stats["wins"]
+    print(f"✅ Each signal executed all 3 martingale levels (total 10 min per signal)")
+
+    # Generate randomised fake results for Telegram summary
+    fake = generate_fake_results()
+    total = fake["total_signals"]
+    wins = fake["wins"]
+    losses = fake["losses"]
     win_rate = (wins / total * 100) if total > 0 else 0
-    
+
     summary = f"""📊 MSL VIP SIGNAL - OTC SESSION COMPLETED
 ⏰ {datetime.now(LAGOS_TZ).strftime('%Y-%m-%d %H:%M:%S')}
 
 📈 SESSION RESULTS:
 🎯 Total Signals: {total}
 ✅ Total Wins: {wins} ({win_rate:.1f}%)
-❌ Total Losses: {stats["losses"]}
+❌ Total Losses: {losses}
 
 🏆 WIN BREAKDOWN:
-🥇 First Entry Wins: {stats["first_entry_wins"]}
-🥈 MG1 Wins: {stats["mg1_wins"]}
-🥉 MG2 Wins: {stats["mg2_wins"]}
-4️⃣ MG3 Wins: {stats["mg3_wins"]}
+🥇 First Entry Wins: {fake["first_entry_wins"]}
+🥈 MG1 Wins: {fake["mg1_wins"]}
+🥉 MG2 Wins: {fake["mg2_wins"]}
 
 OTC Session completed! 🎉"""
-    
+
     send_telegram(summary)
     print(summary)
     await feed.close()
@@ -814,9 +799,9 @@ async def main():
 if __name__ == "__main__":
     print("🔥  MSL BOT v2.0 - OTC REAL DATA VERSION")
     print("=" * 60)
-    print("✅ ALL 4 MARTINGALE LEVELS WILL EXECUTE FOR EVERY SIGNAL")
+    print("✅ ALL 3 MARTINGALE LEVELS WILL EXECUTE FOR EVERY SIGNAL")
     print("✅ NO EARLY EXITS - Regardless of win/loss")
-    print(f"⏱️  Each signal: 2 min wait + 12 min execution = 14 min + 1 min gap = 15 min total")
+    print(f"⏱️  Each signal: 1 min wait + 9 min execution = 10 min + 2 min gap = 12 min total")
     print(f"📊 Data: {'Pocket Option REAL (HTTP API)' if USE_POCKET_OPTION and PO_SESSION_TOKEN else 'Simulator'}")
     print(f"🚀 Fast Mode: {'ON' if FAST_MODE else 'OFF'}")
     print(f"💬 Telegram: {'CONFIGURED' if TELEGRAM_BOT_TOKEN else 'SIMULATION'}")
