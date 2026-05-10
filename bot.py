@@ -603,7 +603,7 @@ async def process_entry(data_source, sig, entry_type, entry_price):
 async def execute_signal(data_source, sig):
     """
     ALWAYS executes ALL 3 entries:
-    - First Entry (1 min after signal drop)
+    - First Entry (2 min after signal drop)
     - MG1 Entry (3 min after First Entry)
     - MG2 Entry (3 min after MG1 Entry)
     NO EARLY EXITS - regardless of win/loss
@@ -617,8 +617,8 @@ async def execute_signal(data_source, sig):
         mg2_win_type = None
 
         # ===== FIRST ENTRY =====
-        # Wait 1 minute after signal drop before first entry
-        await asyncio.sleep(60 if not FAST_MODE else 5)
+        # Wait 2 minutes after signal drop before first entry
+        await asyncio.sleep(120 if not FAST_MODE else 5)
 
         first_entry_price = await data_source.get_latest_price(sig["pair"])
         if first_entry_price is None:
@@ -709,7 +709,7 @@ async def run_trading_session():
     for sig_num in range(1, SIGNALS_PER_SESSION + 1):
         try:
             print(f"\n[SESSION-OTC] === Signal {sig_num}/{SIGNALS_PER_SESSION} ===")
-            print(f"[TIMING] This signal will run for 10 minutes (1 min wait + 3 entries x 3 min each)")
+            print(f"[TIMING] This signal will run for 11 minutes (2 min wait + 3 entries x 3 min each)")
 
             await wait_until_next_minute()
             pair = random.choice(PAIRS)
@@ -726,8 +726,8 @@ async def run_trading_session():
                 continue
 
             drop_time = datetime.now(LAGOS_TZ)
-            # Entry time set to 1 minute after drop time
-            entry_time = drop_time + timedelta(minutes=1)
+            # Entry time set to 2 minutes after drop time
+            entry_time = drop_time + timedelta(minutes=2)
 
             # Override confidence with random value between 90 and 97
             display_confidence = random.randint(90, 97)
@@ -759,7 +759,7 @@ async def run_trading_session():
             print(f"[SESSION-OTC] Error in signal {sig_num}: {e}")
 
     print(f"\n✅ All {SIGNALS_PER_SESSION} OTC signals completed!")
-    print(f"✅ Each signal executed all 3 martingale levels (total 10 min per signal)")
+    print(f"✅ Each signal executed all 3 martingale levels (total 11 min per signal)")
 
     # Generate randomised fake results for Telegram summary
     fake = generate_fake_results()
@@ -805,7 +805,7 @@ if __name__ == "__main__":
     print("=" * 60)
     print("✅ ALL 3 MARTINGALE LEVELS WILL EXECUTE FOR EVERY SIGNAL")
     print("✅ NO EARLY EXITS - Regardless of win/loss")
-    print(f"⏱️  Each signal: 1 min wait + 9 min execution = 10 min + 2 min gap = 12 min total")
+    print(f"⏱️  Each signal: 2 min wait + 9 min execution = 11 min + 2 min gap = 13 min total")
     print(f"📊 Data: {'Pocket Option REAL (HTTP API)' if USE_POCKET_OPTION and PO_SESSION_TOKEN else 'Simulator'}")
     print(f"🚀 Fast Mode: {'ON' if FAST_MODE else 'OFF'}")
     print(f"💬 Telegram: {'CONFIGURED' if TELEGRAM_BOT_TOKEN else 'SIMULATION'}")
