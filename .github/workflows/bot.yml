@@ -37,4 +37,3 @@ jobs:
           PO_USER_ID: ${{ secrets.PO_USER_ID }}
         run: |
           python bot.py
-
